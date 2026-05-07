@@ -1,0 +1,35 @@
+# --- 1. Security (CRITICAL) ---
+# Never upload these. They contain your API keys.
+venv/
+env/
+.env
+
+# --- 2. Data & Legal PDFs (IMPORTANT) ---
+# You don't want to upload 50+ heavy PDFs to GitHub.
+# Pinecone now handles the cloud memory; GitHub only needs the code.
+backend/data/raw/
+backend/data/processed/
+*.pdf
+*.json
+# Exception: Keep your lawyers_db if you want it versioned
+!backend/data/raw/lawyers_db.json
+
+# --- 3. Python Internals ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- 4. RAG & Vector Memory ---
+# Local FAISS/Chroma files are no longer needed for production.
+chroma_db/
+vectorstore/
+
+
+# --- 5. System & IDE Junk ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- 6. Logs ---
+*.log

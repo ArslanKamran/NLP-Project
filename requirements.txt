@@ -1,0 +1,30 @@
+# Core Frameworks
+Flask
+groq
+python-dotenv
+
+# AI & LangChain
+faiss-cpu
+langchain
+langchain-community
+langchain-core
+langchain-groq
+langchain-google-genai
+langchain-huggingface
+langchain-pinecone
+langchain-text-splitters
+gunicorn
+
+# Data Processing
+pypdf
+pdfplumber
+beautifulsoup4
+networkx
+numpy
+pandas
+
+# Utilities
+tqdm
+requests
+aiohttp
+pydantic
