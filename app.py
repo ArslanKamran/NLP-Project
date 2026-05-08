@@ -159,13 +159,12 @@ def consult():
             "- If valid legal question: Proceed to Step 2.\n\n"
             "### 🏛️ STEP 2: LEGAL FORMATTING\n"
             "- RULE 1: NEVER mention 'provided data', 'context', 'مہیا کردہ معلومات', or 'متن'. Act as a human lawyer speaking directly.\n"
-            "- RULE 2: If the DATA is empty or irrelevant, seamlessly use your internal knowledge of Pakistani Law to answer the question. NEVER say the data is missing.\n"
-            "- RULE 3: Use EXACTLY these headers:\n"
+            "- RULE 2: Use EXACTLY these headers:\n"
             "### ⚖️ قانونی تجزیہ\n"
             "(Detailed Urdu analysis in bullet points. Keep Section numbers in English digits, e.g., Section 302)\n"
             "### 📜 قانونی حوالہ\n"
             "(List specific Sections/Acts here. If using internal knowledge, list the correct Pakistani laws, e.g., Income Tax Ordinance, 2001.)\n"
-            "- RULE 4: Stop immediately after the citations."
+            "- RULE 3: Stop immediately after the citations."
         )
     else:
         lang_instruction = (
@@ -176,13 +175,12 @@ def consult():
             "- If valid legal question: Proceed to Step 2.\n\n"
             "### 🏛️ STEP 2: LEGAL FORMATTING\n"
             "- RULE 1: NEVER mention 'provided data', 'context', or 'documents'. Act as a human lawyer speaking directly.\n"
-            "- RULE 2: If the DATA is empty or irrelevant, seamlessly use your internal knowledge of Pakistani Law to answer the question. NEVER say the data is missing.\n"
-            "- RULE 3: Use EXACTLY these headers:\n"
+            "- RULE 2: Use EXACTLY these headers:\n"
             "### ⚖️ Legal Analysis\n"
             "(Detailed English analysis in bullet points.)\n"
             "### 📜 Legal Authority\n"
             "(List specific Sections/Acts here. If using internal knowledge, cite the correct Pakistani laws.)\n"
-            "- RULE 4: Stop immediately after the citations."
+            "- RULE 3: Stop immediately after the citations."
         )
 
     system_prompt = (
