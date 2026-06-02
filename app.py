@@ -6,6 +6,14 @@ import threading
 from flask import Flask, render_template, request, jsonify, Response, stream_with_context
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
+from collections import defaultdict
+
+# --- AUTOMATION ---
+from update_memory import update_memory
+update_memory() # This automatically triggers the RAG update on server startup!
+
+# This creates a temporary memory based on the user's IP address
+chat_memory = defaultdict(list)
 
 # Ensure local imports work correctly
 sys.path.append(os.getcwd()) 
@@ -99,7 +107,7 @@ def generate_gemini_response(prompt):
                     print("\n" + "="*50)
                     print(f"📊 [LIVE TOKEN MONITOR - KEY {i+1}]")
                     print(f"📥 Input (Reading PDFs) : {in_tokens} tokens")
-                    print(f"📤 Output (Writing Urdu): {out_tokens} tokens")
+                    print(f"📤 Output (Writing)     : {out_tokens} tokens")
                     print(f"📈 Total for this query : {total_tokens} tokens")
                     print("="*50 + "\n")
 
@@ -131,64 +139,118 @@ def consult():
     data = request.json
     user_text = data.get('text', '').strip()
     user_lang = data.get('lang', 'en') 
+    
+    # 🧠 Get user's IP to track their specific conversation history
+    user_ip = request.remote_addr
+    history = chat_memory[user_ip]
+    
+    # Format the last 6 messages (3 turns) so the AI remembers the context
+    history_text = ""
+    for role, msg in history[-6:]:
+        history_text += f"{role.upper()}: {msg}\n"
 
-    context = ""
-    if rag:
-        try:
-            docs = rag.search(user_text, k=20) 
-            if docs:
-                for doc in docs:
-                    if hasattr(doc, 'page_content'):
-                        text_snippet = doc.page_content[:2500]
-                    elif isinstance(doc, dict):
-                        text_snippet = doc.get('text', str(doc))[:2500]
-                    else:
-                        text_snippet = str(doc)[:2500]
-                    
-                    context += f"\n--- DOCUMENT TEXT ---\n{text_snippet}...\n"
-        except Exception as e:
-             return Response(f"Memory Error: {str(e)}", mimetype='text/plain')
-
-    # 🛡️ THE HYBRID PROMPT: Never says [DATA MISSING] again!
-    if user_lang == 'ur':
-        lang_instruction = (
-            "CRITICAL INSTRUCTION: User prefers URDU. Write ENTIRE response in formal 'Adalti' (Legal) Urdu.\n\n"
-            "### 🧠 STEP 1: INTENT EVALUATION\n"
-            "- If query is a greeting: Respond ONLY with 'السلام علیکم! میں قانون اے آئی ہوں، آپ کا قانونی معاون۔ میں آپ کی کیا مدد کر سکتا ہوں؟' and STOP.\n"
-            "- If query is abusive/off-topic: Respond ONLY with '🛑 **[OFF-TOPIC]** میں صرف پاکستانی قانون سے متعلق سوالات کے جوابات دے سکتا ہوں۔' and STOP.\n"
-            "- If valid legal question: Proceed to Step 2.\n\n"
-            "### 🏛️ STEP 2: LEGAL FORMATTING\n"
-            "- RULE 1: NEVER mention 'provided data', 'context', 'مہیا کردہ معلومات', or 'متن'. Act as a human lawyer speaking directly.\n"
-            "- RULE 2: Use EXACTLY these headers:\n"
-            "### ⚖️ قانونی تجزیہ\n"
-            "(Detailed Urdu analysis in bullet points. Keep Section numbers in English digits, e.g., Section 302)\n"
-            "### 📜 قانونی حوالہ\n"
-            "(List specific Sections/Acts here. If using internal knowledge, list the correct Pakistani laws, e.g., Income Tax Ordinance, 2001.)\n"
-            "- RULE 3: Stop immediately after the citations."
-        )
-    else:
-        lang_instruction = (
-            "CRITICAL INSTRUCTION: User prefers ENGLISH. Write ENTIRE response in professional English.\n\n"
-            "### 🧠 STEP 1: INTENT EVALUATION\n"
-            "- If query is a greeting: Respond ONLY with 'Greetings! I am Qanoon AI, a specialized legal assistant for Pakistani law. How can I assist you today?' and STOP.\n"
-            "- If query is abusive/off-topic: Respond ONLY with '🛑 **[OFF-TOPIC]** I can only assist with matters related to Pakistani law.' and STOP.\n"
-            "- If valid legal question: Proceed to Step 2.\n\n"
-            "### 🏛️ STEP 2: LEGAL FORMATTING\n"
-            "- RULE 1: NEVER mention 'provided data', 'context', or 'documents'. Act as a human lawyer speaking directly.\n"
-            "- RULE 2: Use EXACTLY these headers:\n"
-            "### ⚖️ Legal Analysis\n"
-            "(Detailed English analysis in bullet points.)\n"
-            "### 📜 Legal Authority\n"
-            "(List specific Sections/Acts here. If using internal knowledge, cite the correct Pakistani laws.)\n"
-            "- RULE 3: Stop immediately after the citations."
-        )
-
-    system_prompt = (
-        f"You are Qanoon AI, an elite Legal Consultant for Pakistani Law.\n{lang_instruction}"
+    # 🚀 STAGE 1: THE DYNAMIC INTERROGATOR (NO FAISS SEARCH YET)
+    # 🚀 STAGE 1: THE DYNAMIC INTERROGATOR (RELAXED CONSTRAINTS)
+    triage_prompt = (
+        f"You are an expert Legal Intake Officer for Pakistani Law. User prefers {user_lang.upper()}.\n"
+        f"Conversation History:\n{history_text}\n"
+        f"Current User Input: {user_text}\n\n"
+        "YOUR OBJECTIVE:\n"
+        "You must ensure the general scenario is clear BEFORE allowing a legal analysis.\n"
+        "A scenario is 'complete enough' for a database search if it contains:\n"
+        "1. The core issue (What happened? e.g., eviction, fraud)\n"
+        "2. The general parties (Who? e.g., landlord/tenant. EXACT names are NOT required)\n"
+        "3. General time/location (e.g., Lahore, recently. EXACT addresses are NOT required)\n"
+        "4. Evidence mentioned (e.g., 'I have a contract'. EXACT clauses are NOT required)\n\n"
+        "INSTRUCTIONS:\n"
+        "- If the user provides these general facts, DO NOT ask pedantic questions about exact addresses, specific contract clauses, or full names. Instantly reply EXACTLY and ONLY with: [READY_TO_SEARCH]\n"
+        "- ONLY ask 1 or 2 follow-up questions if a core category (like what actually happened, or if they have any proof at all) is entirely missing.\n"
+        "- Speak naturally and empathetically if you must ask a question.\n"
+        "- NEVER output legal headers or penal codes here."
     )
 
-    full_prompt = f"{system_prompt}\n\n### DATA:\n{context}\n\n### QUERY: {user_text}"
-    return Response(stream_with_context(generate_gemini_response(full_prompt)), mimetype='text/plain')
+    def agentic_workflow():
+        # Run the fast triage prompt
+        triage_chunks = list(generate_gemini_response(triage_prompt))
+        triage_full = "".join(triage_chunks)
+        
+        # If Gemini needs more info, it just asks the question. No database searched!
+        if "[READY_TO_SEARCH]" not in triage_full:
+            for chunk in triage_chunks:
+                yield chunk
+            chat_memory[user_ip].append(("user", user_text))
+            chat_memory[user_ip].append(("assistant", triage_full))
+            return # Stop here, wait for user to reply.
+
+        # ⚖️ STAGE 2: THE HEAVY SEARCH (Only runs when context is complete!)
+        print("\n🔍 [AGENT] Context is complete. Triggering FAISS Vector Search...")
+        context = ""
+        if rag:
+            try:
+                # Lowered k=8 to save tokens since we already know exactly what we are looking for
+                docs = rag.search(f"{history_text} {user_text}", k=8) 
+                if docs:
+                    for doc in docs:
+                        if hasattr(doc, 'page_content'):
+                            text_snippet = doc.page_content[:2500]
+                        elif isinstance(doc, dict):
+                            text_snippet = doc.get('text', str(doc))[:2500]
+                        else:
+                            text_snippet = str(doc)[:2500]
+                        
+                        context += f"\n--- DOCUMENT TEXT ---\n{text_snippet}...\n"
+            except Exception as e:
+                yield f"Memory Error: {str(e)}"
+                return
+
+        # 🛡️ THE FINAL ADVISORY PROMPT
+        if user_lang == 'ur':
+            lang_instruction = (
+                "CRITICAL INSTRUCTION: Write ENTIRE response in formal 'Adalti' (Legal) Urdu.\n\n"
+                "- RULE 1: NEVER mention 'provided data', 'context', 'مہیا کردہ معلومات', or 'متن'. Act as a human lawyer speaking directly.\n"
+                "- RULE 2: If the DATA is empty or irrelevant, seamlessly use your internal knowledge of Pakistani Law. NEVER say the data is missing.\n"
+                "- RULE 3: Do NOT use markdown symbols like ### or **. Use exactly these clean headers:\n\n"
+                "⚖️ قانونی تجزیہ\n"
+                "(Detailed Urdu analysis using a numbered list (1, 2, 3) instead of bullet points. Keep Section numbers in English digits, e.g., Section 302)\n\n"
+                "📜 قانونی حوالہ\n"
+                "(List specific Sections/Acts here. If using internal knowledge, list the correct Pakistani laws, e.g., Income Tax Ordinance, 2001.)\n"
+                "- RULE 4: Stop immediately after the citations.\n"
+                "### 🛑 STEP 3: THE SAFE-FAIL\n"
+                "- If the situation is still too complex, reply EXACTLY with:\n"
+                "'میں اس صورتحال کا مکمل قانونی جائزہ لینے سے قاصر ہوں۔ براہ کرم کسی ماہر وکیل سے رجوع کریں۔' and STOP."
+            )
+        else:
+            lang_instruction = (
+                "CRITICAL INSTRUCTION: Write ENTIRE response in professional English.\n\n"
+                "- RULE 1: NEVER mention 'provided data', 'context', or 'documents'. Act as a human lawyer speaking directly.\n"
+                "- RULE 2: If the DATA is empty or irrelevant, seamlessly use your internal knowledge of Pakistani Law. NEVER say the data is missing.\n"
+                "- RULE 3: Do NOT use markdown symbols like ### or **. Use exactly these clean headers:\n\n"
+                "⚖️ LEGAL ANALYSIS\n"
+                "(Detailed English analysis using a numbered list (1, 2, 3) instead of bullet points.)\n\n"
+                "📜 LEGAL AUTHORITY\n"
+                "(List specific Sections/Acts here. If using internal knowledge, cite the correct Pakistani laws.)\n"
+                "- RULE 4: Stop immediately after the citations.\n"
+                "### 🛑 STEP 3: THE SAFE-FAIL\n"
+                "- If the situation is still too complex, reply EXACTLY with:\n"
+                "'I cannot completely understand this situation to legally assess it. Please consult a human lawyer.' and STOP."
+            )
+
+        final_prompt = (
+            f"You are Qanoon AI, an elite Legal Consultant for Pakistani Law.\n{lang_instruction}\n\n"
+            f"### CHAT HISTORY:\n{history_text}\n\n"
+            f"### LEGAL DATA:\n{context}\n\n"
+            f"### FINAL USER QUERY: {user_text}"
+        )
+
+        final_response = ""
+        for chunk in generate_gemini_response(final_prompt):
+            final_response += chunk
+            yield chunk
+            
+        chat_memory[user_ip].append(("user", user_text))
+        chat_memory[user_ip].append(("assistant", final_response))
+
+    return Response(stream_with_context(agentic_workflow()), mimetype='text/plain')
 
 LAWYERS_DB_PATH = os.path.join("backend", "data", "raw", "lawyers_db.json")
 
